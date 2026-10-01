@@ -166,9 +166,14 @@ box(0.12, 2.3, 0.12, 0x333a44, 0.45, 1.3, 0.35, robot); box(0.12, 2.3, 0.12, 0x3
 for (const [x, z] of [[-0.4, 0.5], [0.4, 0.5], [-0.4, -0.5], [0.4, -0.5]]) { const w = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.12, 14), mat(0x111)); w.rotation.x = Math.PI / 2; w.position.set(x, 0.18, z); robot.add(w); }
 const platform = new THREE.Group(); robot.add(platform);
 box(0.8, 0.06, 0.8, 0xf2c200, 0, 0, 0, platform);
-const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 8), new THREE.MeshBasicMaterial({ color: 0x00ff66 })); beacon.position.set(-0.3, 1.1, 0); robot.add(beacon);
+const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12), new THREE.MeshBasicMaterial({ color: 0x00ff66 })); beacon.position.set(-0.3, 2.6, 0); robot.add(beacon);
+const alertLight = new THREE.PointLight(0xffaa00, 0, 6); alertLight.position.copy(beacon.position); robot.add(alertLight);
+const alertSign = (() => { const c = document.createElement('canvas'); c.width = 256; c.height = 64; const x = c.getContext('2d');
+  x.fillStyle = '#c00'; x.fillRect(0, 0, 256, 64); x.fillStyle = '#fff'; x.font = 'bold 34px system-ui'; x.textAlign = 'center'; x.fillText('PLEASE MOVE', 128, 44);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false })); sp.scale.set(2.4, 0.6, 1); sp.position.set(0, 3.3, 0); sp.visible = false; sp.renderOrder = 6; robot.add(sp); return sp; })();
 
-const R = { x: DOCK.x, z: DOCK.z, a: 0, lift: 0.35, ext: 0, phase: 'idle', t: 0, goal: null, path: [], blocked: false, replan: 0, onArrive: null, carried: [], queue: [], speed: 2.2, started: false, hold: false };
+const R = { x: DOCK.x, z: DOCK.z, a: 0, lift: 0.35, ext: 0, phase: 'idle', t: 0, goal: null, path: [], blocked: false, replan: 0, onArrive: null, carried: [], queue: [], speed: 2.2, started: false, hold: false, crawl: false, alert: 0 };
+const STOP_DIST = 1.05, CAUTION_DIST = 2.6, CRAWL_SPEED = 0.35;
 let robotGrid = buildGrid(RR), peopleGrid = buildGrid(PR);
 function applyRobot() { robot.position.set(R.x, 0, R.z); robot.rotation.y = -R.a; platform.position.set(0.55 + R.ext, R.lift, 0); }
 
@@ -226,13 +231,18 @@ function navTo(x, z, cb) {
   const c = nearestFree(robotGrid, x, z); [R.goal] = [toWorld(...c)]; R.onArrive = cb; R.phase = 'nav'; R.replan = 0; R.path = []; R.blocked = false;
 }
 function plan() {
-  const dyn = robotGrid.slice(); for (const p of people) stamp(dyn, p.x, p.z, PERSON_BLOCK);
+  if (tryPlan(PERSON_BLOCK)) { R.crawl = false; return; }
+  if (tryPlan(0.55)) { R.crawl = true; return; }   // squeeze past slowly; the stop-distance check still applies
+  R.crawl = false; R.blocked = true; R.path = [];
+}
+function tryPlan(block) {
+  const dyn = robotGrid.slice(); for (const p of people) stamp(dyn, p.x, p.z, block);
   const s = toCell(R.x, R.z); for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) if (s[0] + dx >= 0 && s[1] + dz >= 0 && s[0] + dx < GW && s[1] + dz < GH) dyn[gi(s[0] + dx, s[1] + dz)] = robotGrid[gi(s[0] + dx, s[1] + dz)];
   const t = toCell(...R.goal);
   const path = dyn[gi(...t)] ? null : astar(dyn, s, t);
-  if (!path) { R.blocked = true; R.path = []; return; }
+  if (!path) return false;
   R.blocked = false;
-  const pts = smoothPath(dyn, path).map(c => toWorld(...c)).slice(1); pts[pts.length - 1] = R.goal.slice(); R.path = pts;
+  const pts = smoothPath(dyn, path).map(c => toWorld(...c)).slice(1); pts[pts.length - 1] = R.goal.slice(); R.path = pts; return true;
 }
 const angDiff = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
 function turnTo(angle, cb) { R.faceAngle = angle; R.afterTurn = cb; R.phase = 'turn'; }
@@ -255,15 +265,21 @@ function fits() { const S = CARS[car.confirmed]; return ordered().every(i => i.l
 function stopPoint(type) { return { x: REAR_X - CARS[type].gap, z: BAYS[car.bay].z }; }
 
 function updateRobot(dt) {
-  R.t += dt;
+  R.t += dt; if (R.phase !== 'nav') { R.alert = 0; R.hold = false; }
   switch (R.phase) {
     case 'nav': {
       R.replan -= dt; if (R.replan <= 0) { plan(); R.replan = 0.3; }
-      R.hold = false; if (R.blocked || !R.path.length) { R.hold = R.blocked; if (!R.blocked && !R.path.length) { R.x = R.goal[0]; R.z = R.goal[1]; const cb = R.onArrive; setPhase('idle'); cb && cb(); } break; }
+      R.hold = false; R.alert = R.blocked ? 2 : 0; if (R.blocked || !R.path.length) { R.hold = R.blocked; if (!R.blocked && !R.path.length) { R.x = R.goal[0]; R.z = R.goal[1]; const cb = R.onArrive; setPhase('idle'); cb && cb(); } break; }
       const [wx, wz] = R.path[0], dx = wx - R.x, dz = wz - R.z, d = Math.hypot(dx, dz), want = Math.atan2(dz, dx);
       const diff = angDiff(R.a, want); R.a += Math.max(-4 * dt, Math.min(4 * dt, diff));
-      for (const p of people) { const px = p.x - R.x, pz = p.z - R.z; if (Math.hypot(px, pz) < 1.05 && px * dx + pz * dz > 0) R.hold = true; }
-      if (!R.hold && Math.abs(diff) < 0.7) { const step = Math.min(d, R.speed * dt); R.x += dx / d * step; R.z += dz / d * step; }
+      let near = Infinity;
+      for (const p of people) { const px = p.x - R.x, pz = p.z - R.z, pd = Math.hypot(px, pz); if (px * dx + pz * dz > 0 && pd < near) near = pd; }
+      let v = R.speed;
+      if (near < STOP_DIST) R.hold = true;
+      else if (near < CAUTION_DIST) v = CRAWL_SPEED + (R.speed - CRAWL_SPEED) * (near - STOP_DIST) / (CAUTION_DIST - STOP_DIST);
+      if (R.crawl) v = Math.min(v, CRAWL_SPEED);
+      R.alert = R.hold ? 2 : (near < CAUTION_DIST || R.crawl) ? 1 : 0;
+      if (!R.hold && Math.abs(diff) < 0.7) { const step = Math.min(d, v * dt); R.x += dx / d * step; R.z += dz / d * step; }
       if (d < 0.08) R.path.shift();
       break;
     }
@@ -387,7 +403,7 @@ canvas.addEventListener('pointerup', e => {
 const PHASE = { idle: 'Idle at dock', nav: 'Navigating', turn: 'Aligning', pick: 'Picking item', waiting: 'At waiting area', load: 'Loading vehicle', assist: 'Staff assist needed' };
 function hud() {
   let s = PHASE[R.phase] || R.phase;
-  if (R.phase === 'nav') s = R.blocked ? 'Path blocked by people — waiting / re-planning' : R.hold ? 'Person ahead — holding' : 'Navigating';
+  if (R.phase === 'nav') s = R.blocked ? 'Path blocked — alert light on, waiting for people to move' : R.hold ? 'Person too close — stopped, asking them to move' : R.alert ? 'Person nearby — moving slowly' : 'Navigating';
   if (R.phase === 'waiting') s = !car ? 'Waiting for client car to arrive at spot' : car.state === 'confirmed' ? 'Client confirmed' : car.state === 'parked' ? 'Car parked — awaiting client confirmation' : 'Waiting for car to park';
   document.getElementById('state').textContent = 'Robot: ' + s + (paused ? ' (paused)' : '');
   const ord = items.filter(i => i.state !== 'shelf').map(i => `${TYPES[i.type].label} <small>(${i.len} m, ${i.state})</small>`);
@@ -402,7 +418,9 @@ function loop(now) {
   requestAnimationFrame(loop); const dt = Math.min(0.05, (now - last) / 1000); last = now;
   if (!paused) { updatePeople(dt); updateCar(dt); updateRobot(dt); }
   const tick = ordered().length; items.forEach(i => { if (i.tag.visible) i.tag.position.y = 0.6 + Math.sin(now / 250) * 0.08; });
-  beacon.material.color.set(R.blocked || R.hold ? 0xff3322 : 0x00ff66);
+  const flash = Math.sin(now / (R.alert === 2 ? 90 : 160)) > 0;
+  beacon.material.color.set(R.alert === 0 ? 0x00ff66 : !flash ? 0x332200 : R.alert === 2 ? 0xff2200 : 0xffaa00);
+  alertLight.color.set(R.alert === 2 ? 0xff2200 : 0xffaa00); alertLight.intensity = R.alert && flash ? 40 : 0; alertSign.visible = R.alert > 0;
   applyRobot(); controls.update(); renderer.render(scene, camera);
   hudT -= dt; if (hudT <= 0) { hud(); hudT = 0.2; }
 }

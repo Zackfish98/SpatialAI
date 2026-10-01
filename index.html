@@ -32,7 +32,7 @@
 <div id="panel" class="box"><h3>Home Depot Robot</h3><div id="state"></div><div id="info"></div><div id="log"></div></div>
 <div id="rules" class="box"><b>Rules</b><ol>
   <li>Robot picks ordered items (max 3), then goes to the loading-zone waiting area.</li>
-  <li>It avoids shelves, walls, parked cars and people; it re-plans around people and waits if fully blocked.</li>
+  <li>It avoids shelves, walls and cars, and re-plans around people. A person ahead within 2.6 m makes it slow down (amber flashing light); within 1 m it stops (red flashing light + “PLEASE MOVE”). If no clear path exists it creeps through any gap, or waits until people move.</li>
   <li>It waits until the client's car is parked at the assigned spot <i>and</i> the client confirms their location.</li>
   <li>The app-listed car type is only a guess; the type confirmed on site decides how to load.</li>
   <li>Loading type sets approach gap, lift height and max cargo length (Pickup 3.0 m, SUV 2.5 m, Sedan trunk 1.3 m).</li>
