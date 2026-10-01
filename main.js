@@ -11,9 +11,9 @@ const DOCK = { x: -14.4, z: 0 }, WAIT = { x: 9.8, z: 8 };
 const REAR_X = 11;
 const BAYS = [{ name: 'A', z: -5.5 }, { name: 'B', z: 3.5 }];
 const CARS = {
-  truck: { label: 'Pickup truck', L: 5.2, W: 2.0, h: 1.1, maxLen: 3.0, gap: 1.7, reach: 0.9 },
-  sedan: { label: 'Sedan (trunk)', L: 4.6, W: 1.9, h: 0.9, maxLen: 1.3, gap: 1.5, reach: 0.6 },
-  suv:   { label: 'SUV (hatch)', L: 4.8, W: 2.0, h: 1.0, maxLen: 2.5, gap: 1.9, reach: 0.8 },
+  truck: { label: 'Pickup truck', L: 5.2, W: 2.0, h: 1.1, maxLen: 3.0, gap: 1.25, reach: 1.4 },
+  sedan: { label: 'Sedan (trunk)', L: 4.6, W: 1.9, h: 0.9, maxLen: 1.3, gap: 1.15, reach: 1.2 },
+  suv:   { label: 'SUV (hatch)', L: 4.8, W: 2.0, h: 1.0, maxLen: 2.5, gap: 1.35, reach: 1.3 },
 };
 const TYPES = {
   stud:  { label: '2x4x8 Stud', len: 2.4, h: 0.09, w: 0.14, color: 0xd9b27c },
@@ -121,6 +121,18 @@ function label(text, x, z, color = '#223', size = 1.6) {
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false }));
   s.scale.set(size * 4, size, 1); s.position.set(x, 0.3, z); s.renderOrder = 5; scene.add(s); return s;
 }
+function textSprite(text, bg, fg = '#fff', w = 2.4, h = 0.6) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64; const tex = new THREE.CanvasTexture(c);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false })); sp.scale.set(w, h, 1); sp.renderOrder = 6;
+  sp.userData.set = (t, b) => { const x = c.getContext('2d'); x.clearRect(0, 0, 256, 64); x.fillStyle = b; x.fillRect(0, 0, 256, 64); x.fillStyle = fg; x.font = 'bold 30px system-ui'; x.textAlign = 'center'; x.fillText(t, 128, 43); tex.needsUpdate = true; };
+  sp.userData.set(text, bg); return sp;
+}
+function personMesh(c, scale = 1) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.3, 1.1, 14), mat(c)); body.position.y = 0.65; body.castShadow = true; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10), mat(0xf0c8a0)); head.position.y = 1.4; head.castShadow = true; g.add(head);
+  g.scale.setScalar(scale); return g;
+}
 const flat = (w, d, c, x, z, y = 0.01) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat(c)); m.rotation.x = -Math.PI / 2; m.position.set(x, y, z); m.receiveShadow = true; scene.add(m); return m; };
 
 flat(60, 40, 0x93b779, 0, 0, -0.02);
@@ -136,7 +148,15 @@ for (const w of walls) box(w.hx * 2, 1.8, w.hz * 2, 0xb8b2a6, w.x, 0.9, w.z, sce
 box(24, 0.8, 0.3, 0xb8b2a6, -4, 0.4, -10.15, scene); box(24, 0.8, 0.3, 0xb8b2a6, -4, 0.4, 10.15, scene); box(0.3, 0.8, 20, 0xb8b2a6, -16.15, 0.4, 0, scene);
 flat(2.4, 2.4, 0x2e8b3d, DOCK.x, DOCK.z, 0.02); label('DOCK', DOCK.x, DOCK.z + 1.8, '#2e8b3d', 1.1);
 flat(3, 3, 0xf2c200, WAIT.x, WAIT.z, 0.02); label('WAITING AREA', WAIT.x, WAIT.z + 2.2, '#a07d00', 1.1);
-label('LOADING ZONE', 13, -9, '#fff', 1.4); label('DOOR', 8, -0.1, '#223', 0.9);
+label('DOOR', 8, -0.1, '#223', 0.9);
+const zoneOverlay = flat(10, 20, 0xff2200, 13, 0, 0.022); zoneOverlay.material.transparent = true; zoneOverlay.material.opacity = 0.22; zoneOverlay.visible = false;
+const zoneLabel = textSprite('LOADING ZONE: OPEN', '#2e8b3d', '#fff', 5, 1.25); zoneLabel.position.set(14, 0.4, 8.6); scene.add(zoneLabel);
+const pathLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xf96302 })); pathLine.frustumCulled = false; scene.add(pathLine);
+const focusRing = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.7, 28), new THREE.MeshBasicMaterial({ color: 0xf96302, side: THREE.DoubleSide, transparent: true, opacity: 0.9 }));
+focusRing.rotation.x = -Math.PI / 2; focusRing.position.y = 0.05; focusRing.visible = false; scene.add(focusRing);
+const trail = { pts: [], line: new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xffc400 })) }; trail.line.frustumCulled = false; scene.add(trail.line);
+function trailAdd(x, z) { const l = trail.pts[trail.pts.length - 1]; if (l && Math.hypot(l.x - x, l.z - z) < 0.3) return; trail.pts.push(new THREE.Vector3(x, 0.07, z)); trail.line.geometry.setFromPoints(trail.pts); }
+function trailClear() { trail.pts = []; trail.line.geometry.setFromPoints([]); }
 const bayMarks = BAYS.map(b => {
   const m = flat(6, 2.8, 0x4b4f55, REAR_X + 3, b.z, 0.015);
   for (const s of [-1, 1]) flat(6, 0.08, 0xffffff, REAR_X + 3, b.z + s * 1.4, 0.03);
@@ -164,6 +184,7 @@ const robot = new THREE.Group(); scene.add(robot);
 box(1.2, 0.35, 0.9, 0x2255aa, 0, 0.3, 0, robot); box(0.5, 0.5, 0.7, 0xf96302, -0.3, 0.7, 0, robot);
 box(0.12, 2.3, 0.12, 0x333a44, 0.45, 1.3, 0.35, robot); box(0.12, 2.3, 0.12, 0x333a44, 0.45, 1.3, -0.35, robot);
 for (const [x, z] of [[-0.4, 0.5], [0.4, 0.5], [-0.4, -0.5], [0.4, -0.5]]) { const w = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.12, 14), mat(0x111)); w.rotation.x = Math.PI / 2; w.position.set(x, 0.18, z); robot.add(w); }
+const arm = box(1, 0.06, 0.14, 0x333a44, 0.5, 0.3, 0, robot);
 const platform = new THREE.Group(); robot.add(platform);
 box(0.8, 0.06, 0.8, 0xf2c200, 0, 0, 0, platform);
 const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12), new THREE.MeshBasicMaterial({ color: 0x00ff66 })); beacon.position.set(-0.3, 2.6, 0); robot.add(beacon);
@@ -175,21 +196,31 @@ const alertSign = (() => { const c = document.createElement('canvas'); c.width =
 const R = { x: DOCK.x, z: DOCK.z, a: 0, lift: 0.35, ext: 0, phase: 'idle', t: 0, goal: null, path: [], blocked: false, replan: 0, onArrive: null, carried: [], queue: [], speed: 2.2, started: false, hold: false, crawl: false, alert: 0 };
 const STOP_DIST = 1.05, CAUTION_DIST = 2.6, CRAWL_SPEED = 0.35;
 let robotGrid = buildGrid(RR), peopleGrid = buildGrid(PR);
-function applyRobot() { robot.position.set(R.x, 0, R.z); robot.rotation.y = -R.a; platform.position.set(0.55 + R.ext, R.lift, 0); }
+function applyRobot() { robot.position.set(R.x, 0, R.z); robot.rotation.y = -R.a; platform.position.set(0.55 + R.ext, R.lift, 0); const len = 0.55 + R.ext; arm.scale.x = len; arm.position.set(len / 2, R.lift - 0.06, 0); }
 
 // ---------- People (dynamic obstacles) ----------
 const people = []; let freeze = false;
 function addPerson(x, z) {
-  const g = new THREE.Group(), c = [0xd33, 0x38c, 0x6a3, 0xa5a, 0xe90][people.length % 5];
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.3, 1.1, 14), mat(c)); body.position.y = 0.65; body.castShadow = true; g.add(body);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10), mat(0xf0c8a0)); head.position.y = 1.4; head.castShadow = true; g.add(head);
-  scene.add(g);
+  const g = personMesh([0xd33, 0x38c, 0x6a3, 0xa5a, 0xe90][people.length % 5]); scene.add(g);
   if (x === undefined) { do { x = X0 + 1 + Math.random() * 32; z = Z0 + 1 + Math.random() * 18; } while (peopleGrid[gi(...toCell(x, z))] || Math.hypot(x - R.x, z - R.z) < 3); }
-  const p = { x, z, mesh: g, path: [], wait: 0 }; people.push(p); g.position.set(x, 0, z);
+  const p = { x, z, mesh: g, path: [], wait: 0, mode: null, stage: 0 }; people.push(p); g.position.set(x, 0, z);
+}
+let zoneRestricted = false;
+function planTo(p, x, z) {
+  const s = nearestFree(peopleGrid, p.x, p.z), path = astar(peopleGrid, s, nearestFree(peopleGrid, x, z));
+  if (!path) return false; p.path = smoothPath(peopleGrid, path).map(c => toWorld(...c)).slice(1); return true;
 }
 function personPlan(p) {
+  if (p.mode === 'try') {
+    if (p.stage === 0) { if (planTo(p, 6.8, 0)) p.stage = 1; else p.mode = null; }
+    else if (p.stage === 1) {
+      if (zoneRestricted) { log('App: shopper turned back at the door — zone is restricted for a client loading.'); p.mode = null; p.wait = 2; }
+      else { log('App: zone is open — shopper allowed outside.'); planTo(p, 13.5, 0); p.stage = 2; }
+    } else { p.mode = null; p.wait = 1; }
+    return;
+  }
   for (let k = 0; k < 8; k++) {
-    const tx = X0 + 1 + Math.random() * 32, tz = Z0 + 1 + Math.random() * 18, t = toCell(tx, tz);
+    const tx = X0 + 1 + Math.random() * (zoneRestricted ? 22 : 32), tz = Z0 + 1 + Math.random() * 18, t = toCell(tx, tz);
     if (peopleGrid[gi(...t)]) continue;
     const s = nearestFree(peopleGrid, p.x, p.z), path = astar(peopleGrid, s, t);
     if (path) { p.path = smoothPath(peopleGrid, path).map(c => toWorld(...c)).slice(1); return; }
@@ -222,6 +253,10 @@ function buildCar(type) {
 const carBox = c => ({ x: REAR_X + CARS[c.actual].L / 2, z: BAYS[c.bay].z, hx: CARS[c.actual].L / 2, hz: CARS[c.actual].W / 2 });
 function rebuildGrids() { const ex = car && car.state !== 'departing' ? [carBox(car)] : []; robotGrid = buildGrid(RR, ex); peopleGrid = buildGrid(PR, ex); }
 
+// ---------- Flow tracker ----------
+const STEPS = [['order', 'Customer orders items'], ['app', 'App: client registers plate + car type'], ['pick', 'Robot picks items'], ['wait', 'Robot waits in waiting area'],
+  ['park', 'Client drives in, parks at spot'], ['confirm', 'Client confirms location + car type'], ['approach', 'Robot approaches vehicle'], ['load', 'Robot loads vehicle'], ['depart', 'Client leaves, robot returns']];
+const doneSteps = new Set(); const markStep = k => doneSteps.add(k);
 // ---------- Mission logic ----------
 const logEl = document.getElementById('log'), logLines = [];
 function log(m, err) { logLines.unshift({ m, err }); logLines.length = Math.min(logLines.length, 6); logEl.innerHTML = logLines.map(l => `<div class="${l.err ? 'err' : ''}">${l.err ? '⚠ ' : '• '}${l.m}</div>`).join(''); }
@@ -252,12 +287,12 @@ const lerpTo = (v, to, rate, dt) => v + Math.max(-rate * dt, Math.min(rate * dt,
 function startMission() {
   if (R.phase !== 'idle') return log('Mission already in progress.', true);
   const list = ordered(); if (!list.length) return log('Order is empty. Add items first.', true);
-  R.started = true; let p = { x: R.x, z: R.z }; R.queue = [];
+  R.started = true; markStep('pick'); let p = { x: R.x, z: R.z }; R.queue = [];
   while (list.length) { list.sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z)); const it = list.shift(); R.queue.push(it); p = it; }
   log(`Mission started: ${R.queue.length} item(s).`); nextItem();
 }
 function nextItem() {
-  if (!R.queue.length) { log('All items picked. Heading to waiting area.'); return navTo(WAIT.x, WAIT.z, () => { setPhase('waiting'); }); }
+  if (!R.queue.length) { log('All items picked. Heading to waiting area.'); return navTo(WAIT.x, WAIT.z, () => { setPhase('waiting'); markStep('wait'); }); }
   const it = R.queue.shift(), pp = pickPoint(it);
   navTo(pp.x, pp.z, () => turnTo(-it.face * Math.PI / 2, () => { R.target = it; setPhase('pick'); }));
 }
@@ -299,27 +334,28 @@ function updateRobot(dt) {
       if (car.state === 'confirmed') {
         const S = CARS[car.confirmed];
         if (!fits()) { setPhase('assist'); log(`Cargo too long for ${S.label} (max ${S.maxLen} m). Staff assist requested.`, true); break; }
-        const sp = stopPoint(car.confirmed); log(`Approaching ${S.label} at spot ${BAYS[car.bay].name}.`);
+        const sp = stopPoint(car.confirmed); log(`Approaching ${S.label} at spot ${BAYS[car.bay].name}.`); markStep('approach');
         navTo(sp.x, sp.z, () => turnTo(0, () => setPhase('load')));
       }
       break;
     }
     case 'load': {
       const t = R.t, S = CARS[car.confirmed], lid = car.mesh.userData;
-      if (t < 1.3) { R.lift = lerpTo(R.lift, S.h + 0.1, 1.2, dt); lid.lid.rotation.z = lerpTo(lid.lid.rotation.z, lid.max, 1.4, dt); }
-      else if (t < 2.4) R.ext = lerpTo(R.ext, S.reach, 1.2, dt);
-      else {
+      if (t < 1.4) { R.lift = lerpTo(R.lift, S.h + 0.1, 1.2, dt); lid.lid.rotation.z = lerpTo(lid.lid.rotation.z, lid.max, 1.4, dt); }
+      else if (t < 2.6) R.ext = lerpTo(R.ext, S.reach, 1.2, dt);
+      else if (t < 3.8) {
         if (R.carried.length) {
-          R.carried.forEach((it, i) => { it.state = 'loaded'; car.mesh.add(it.mesh); it.mesh.position.set(-S.L / 2 + 0.25 + it.len / 2, S.h - 0.05 + 0.08 + i * 0.12, (i - 1) * 0.45); it.mesh.rotation.set(0, 0, 0); });
-          log(`Loaded ${R.carried.length} item(s) into ${S.label}.`); R.carried = [];
+          R.carried.forEach((it, i) => { car.mesh.attach(it.mesh); it.mesh.rotation.set(0, 0, 0); it.state = 'loaded';
+            it.from = it.mesh.position.clone(); it.to = new THREE.Vector3(-S.L / 2 + 0.25 + it.len / 2, S.h + 0.03 + i * 0.12, (i - 1) * 0.45); car.cargo.push(it); });
+          log(`Sliding ${R.carried.length} item(s) into the ${S.label}.`); R.carried = [];
         }
-        if (t < 3.5) R.ext = lerpTo(R.ext, 0, 1.2, dt);
-        else if (t < 4.6) { R.lift = lerpTo(R.lift, 0.35, 1.2, dt); if (car.confirmed !== 'truck') lid.lid.rotation.z = lerpTo(lid.lid.rotation.z, 0, 1.4, dt); }
-        else {
-          car.state = 'loaded'; log('Client loaded. Robot returning to dock.');
-          navTo(DOCK.x, DOCK.z, () => { R.started = false; turnTo(0, () => log('Mission complete.')); });
-          setTimeout(() => { if (car) { car.state = 'departing'; rebuildGrids(); } }, 1200);
-        }
+        const k = Math.min(1, (t - 2.6) / 1.2), e = k * k * (3 - 2 * k); for (const it of car.cargo) it.mesh.position.lerpVectors(it.from, it.to, e);
+      } else if (t < 4.9) { for (const it of car.cargo) it.mesh.position.copy(it.to); R.ext = lerpTo(R.ext, 0, 1.2, dt); }
+      else if (t < 6.0) { R.lift = lerpTo(R.lift, 0.35, 1.2, dt); if (car.confirmed !== 'truck') lid.lid.rotation.z = lerpTo(lid.lid.rotation.z, 0, 1.4, dt); }
+      else {
+        car.state = 'loaded'; markStep('load'); log('Loaded. Client returns to the car; robot heads back to the dock.');
+        const c = car.client; c.target = c.door; c.state = 'returning';
+        navTo(DOCK.x, DOCK.z, () => { R.started = false; markStep('depart'); turnTo(0, () => log('Mission complete.')); });
       }
       break;
     }
@@ -327,10 +363,24 @@ function updateRobot(dt) {
 }
 
 function updateCar(dt) {
+  const r = !!car;
+  if (r !== zoneRestricted) {
+    zoneRestricted = r; zoneOverlay.visible = r; zoneLabel.userData.set(r ? 'ZONE RESTRICTED: CLIENT ONLY' : 'LOADING ZONE: OPEN', r ? '#b00020' : '#2e8b3d');
+    let n = 0; for (const p of people) { if (r && (p.x > 8.2 || (p.path.length && p.path[p.path.length - 1][0] > 8.2))) { n++; p.path = []; p.mode = null; } }
+    log(r ? `App: zone restricted — only the registered client may enter.${n ? ` ${n} shopper(s) inside asked to leave.` : ''}` : 'App: loading zone reopened to everyone.');
+  }
   if (!car) return;
-  const S = CARS[car.actual], fx = REAR_X + S.L / 2;
-  if (car.state === 'arriving') { const dx = car.mesh.position.x - fx; car.mesh.position.x -= Math.min(dx, Math.max(0.6, dx * 0.9) * 3.2 * dt * 0.5 + 0.02); if (car.mesh.position.x - fx < 0.02) { car.mesh.position.x = fx; car.state = 'parked'; log(`Car parked at spot ${BAYS[car.bay].name}. Waiting for client to confirm location.`); } }
-  else if (car.state === 'departing') { car.mesh.position.x += 4 * dt; if (car.mesh.position.x > 36) { scene.remove(car.mesh); car = null; rebuildGrids(); } }
+  const S = CARS[car.actual], fx = REAR_X + S.L / 2, c = car.client;
+  if (car.state === 'arriving') {
+    const dx = car.mesh.position.x - fx; car.mesh.position.x -= Math.min(dx, Math.max(0.6, dx * 0.9) * 1.6 * dt + 0.02); trailAdd(car.mesh.position.x - S.L / 2, BAYS[car.bay].z);
+    if (car.mesh.position.x - fx < 0.02) { car.mesh.position.x = fx; car.state = 'parked'; markStep('park'); log(`Car ${car.plate} parked at spot ${BAYS[car.bay].name}. Client: tap "Client confirms" in the app to verify location and car type.`); }
+  } else if (car.state === 'departing') { car.mesh.position.x += 4 * dt; if (car.mesh.position.x > 36) { scene.remove(car.mesh); scene.remove(c.mesh); car = null; rebuildGrids(); } }
+  if (c.state === 'exiting' || c.state === 'returning') {
+    const dx = c.target.x - c.x, dz = c.target.z - c.z, d = Math.hypot(dx, dz), step = Math.min(d, 1.1 * dt);
+    if (d > 0.02) { c.x += dx / d * step; c.z += dz / d * step; c.mesh.position.set(c.x, 0, c.z); c.mesh.rotation.y = -Math.atan2(dz, dx); trailAdd(c.x, c.z); }
+    else if (c.state === 'exiting') { c.state = 'out'; log('Client is standing beside the car (authorized in the zone).'); }
+    else { c.state = 'inside'; c.mesh.visible = false; car.state = 'departing'; log('Client is back in the car and driving away.'); }
+  }
 }
 function updatePeople(dt) {
   if (freeze) return;
@@ -354,26 +404,33 @@ button(g, 'Add item', () => {
   if (ordered().length >= MAX_CARRY) return log(`Rule 1: robot carries at most ${MAX_CARRY} items.`, true);
   const cand = items.filter(i => i.type === ctl.item.value && i.state === 'shelf').sort((a, b) => Math.hypot(a.x - DOCK.x, a.z - DOCK.z) - Math.hypot(b.x - DOCK.x, b.z - DOCK.z))[0];
   if (!cand) return log('Out of stock.', true);
-  cand.state = 'ordered'; cand.tag.visible = true; log(`Ordered ${TYPES[cand.type].label}.`);
+  cand.state = 'ordered'; cand.tag.visible = true; markStep('order'); log(`Ordered ${TYPES[cand.type].label}.`);
 });
 button(g, 'Clear order', () => { if (R.started) return log('Cannot change the order during a mission.', true); items.forEach(i => { if (i.state === 'ordered') { i.state = 'shelf'; i.tag.visible = false; } }); log('Order cleared.'); });
 g = group('Client'); const carOpts = Object.fromEntries(Object.entries(CARS).map(([k, v]) => [k, v.label]));
 const lbl = t => { const s = document.createElement('span'); s.className = 't'; s.textContent = t; g.appendChild(s); };
+lbl('plate'); ctl.plate = document.createElement('input'); Object.assign(ctl.plate, { value: 'HD-4821', maxLength: 9 }); ctl.plate.style.cssText = 'width:70px;padding:5px;border:1px solid #99a;border-radius:6px;font:inherit'; g.appendChild(ctl.plate);
 lbl('app lists'); ctl.listed = select(g, carOpts, 'sedan'); lbl('actually'); ctl.actual = select(g, carOpts, 'sedan');
 button(g, 'Car arrives', () => {
   if (car) return log('A client car is already here.', true);
   const bay = Math.floor(Math.random() * BAYS.length), actual = ctl.actual.value;
   const mesh = buildCar(actual); mesh.position.set(REAR_X + CARS[actual].L / 2 + 16, 0, BAYS[bay].z); scene.add(mesh);
-  car = { listed: ctl.listed.value, actual, confirmed: null, bay, mesh, state: 'arriving' };
+  const plate = (ctl.plate.value || 'HD-0000').toUpperCase().slice(0, 9), sp = textSprite(plate, '#fff', '#223', 2, 0.5); sp.position.set(0, 2.6, 0); mesh.add(sp);
+  const cm = personMesh(0xffc400, 1.1); cm.visible = false; scene.add(cm); const sd = BAYS[bay].z < 0 ? -1 : 1, W = CARS[actual].W, cx = REAR_X + CARS[actual].L / 2;
+  trailClear(); trailAdd(cx + 16, BAYS[bay].z);
+  car = { listed: ctl.listed.value, actual, plate, confirmed: null, bay, mesh, cargo: [], state: 'arriving', client: { mesh: cm, x: cx, z: BAYS[bay].z + sd * W / 2, state: 'inside', door: { x: cx, z: BAYS[bay].z + sd * W / 2 }, target: { x: cx + 0.8, z: BAYS[bay].z + sd * (W / 2 + 1.1) } } };
+  markStep('app'); log(`App: client registered plate ${plate}, car type "${CARS[car.listed].label}" (unverified), assigned spot ${BAYS[bay].name}.`);
   bayMarks.forEach((m, i) => m.material.color.set(i === bay ? 0x2e6b3a : 0x4b4f55)); rebuildGrids();
   log(`Client (app lists ${CARS[car.listed].label}) is heading to spot ${BAYS[bay].name}.`);
 });
 button(g, 'Client confirms', () => {
   if (!car || car.state !== 'parked') return log('Rule 3: client can confirm only once parked at the spot.', true);
-  car.confirmed = car.actual; car.state = 'confirmed';
+  car.confirmed = car.actual; car.state = 'confirmed'; markStep('confirm');
+  const c = car.client; c.x = c.door.x; c.z = c.door.z; c.mesh.position.set(c.x, 0, c.z); c.mesh.visible = true; c.state = 'exiting';
   log(car.confirmed === car.listed ? `Confirmed: ${CARS[car.confirmed].label} (matches app).` : `Confirmed on site: ${CARS[car.confirmed].label} — differs from app listing (${CARS[car.listed].label}). Using confirmed type.`, car.confirmed !== car.listed);
 });
 g = group('Obstacles'); button(g, 'Add person', () => addPerson());
+button(g, 'Shopper tries zone', () => { addPerson(); const p = people[people.length - 1]; p.mode = 'try'; p.stage = 0; log('A shopper is heading for the loading zone…'); });
 ctl.place = button(g, 'Place person (click floor)', () => { placing = !placing; ctl.place.classList.toggle('on', placing); });
 button(g, 'Remove person', () => { const p = people.pop(); if (p) scene.remove(p.mesh); });
 ctl.freeze = button(g, 'Freeze people', () => { freeze = !freeze; ctl.freeze.classList.toggle('on', freeze); ctl.freeze.textContent = freeze ? 'Unfreeze people' : 'Freeze people'; });
@@ -383,7 +440,7 @@ button(g, 'Reset', reset);
 let placing = false, paused = false;
 
 function reset() {
-  if (car) scene.remove(car.mesh); car = null; logLines.length = 0; logEl.innerHTML = '';
+  if (car) { scene.remove(car.mesh); scene.remove(car.client.mesh); } car = null; doneSteps.clear(); trailClear(); zoneRestricted = false; zoneOverlay.visible = false; zoneLabel.userData.set('LOADING ZONE: OPEN', '#2e8b3d'); logLines.length = 0; logEl.innerHTML = '';
   Object.assign(R, { x: DOCK.x, z: DOCK.z, a: 0, lift: 0.35, ext: 0, phase: 'idle', t: 0, goal: null, path: [], blocked: false, onArrive: null, carried: [], queue: [], started: false, hold: false });
   makeStock(); bayMarks.forEach(m => m.material.color.set(0x4b4f55)); rebuildGrids(); log('Reset.');
 }
@@ -411,6 +468,17 @@ function hud() {
     (car ? `Car: app says <b>${CARS[car.listed].label}</b>${car.confirmed ? `, confirmed <b>${CARS[car.confirmed].label}</b>` : ', <i>unconfirmed</i>'} · spot ${BAYS[car.bay].name} · ${car.state}` : 'Car: none') + `<br>People: ${people.length}${freeze ? ' (frozen)' : ''}`;
 }
 
+function clientStatus() {
+  if (!car) return 'not here yet (enter plate + car type in the app, then "Car arrives")';
+  const c = car.client;
+  return { arriving: `driving in to spot ${BAYS[car.bay].name}`, parked: 'parked — must confirm in app', loaded: 'items loaded', departing: 'driving away' }[car.state] ||
+    ({ exiting: 'stepping out of the car', out: 'standing beside the car (allowed in zone)', returning: 'walking back to the car', inside: 'in the car' }[c.state]);
+}
+function flowHud() {
+  const cur = STEPS.findIndex(([k]) => !doneSteps.has(k));
+  document.getElementById('flow').innerHTML = STEPS.map(([k, t], i) => `<div class="step ${doneSteps.has(k) ? 'done' : i === cur ? 'cur' : ''}">${doneSteps.has(k) ? '✓' : i === cur ? '▶' : '○'} ${t}</div>`).join('');
+  document.getElementById('banner').innerHTML = `<b>ROBOT</b> ${document.getElementById('state').textContent.replace('Robot: ', '')}<br><b>CLIENT</b> ${clientStatus()}`;
+}
 function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 let last = performance.now(), hudT = 0;
@@ -421,8 +489,10 @@ function loop(now) {
   const flash = Math.sin(now / (R.alert === 2 ? 90 : 160)) > 0;
   beacon.material.color.set(R.alert === 0 ? 0x00ff66 : !flash ? 0x332200 : R.alert === 2 ? 0xff2200 : 0xffaa00);
   alertLight.color.set(R.alert === 2 ? 0xff2200 : 0xffaa00); alertLight.intensity = R.alert && flash ? 40 : 0; alertSign.visible = R.alert > 0;
+  if (R.phase === 'nav' && R.path.length) { pathLine.geometry.setFromPoints([new THREE.Vector3(R.x, 0.08, R.z), ...R.path.map(q => new THREE.Vector3(q[0], 0.08, q[1]))]); } else pathLine.geometry.setFromPoints([]);
+  focusRing.visible = R.phase === 'nav' && !!R.goal; if (R.goal) { focusRing.position.set(R.goal[0], 0.05, R.goal[1]); focusRing.scale.setScalar(1 + 0.15 * Math.sin(now / 200)); }
   applyRobot(); controls.update(); renderer.render(scene, camera);
-  hudT -= dt; if (hudT <= 0) { hud(); hudT = 0.2; }
+  hudT -= dt; if (hudT <= 0) { hud(); flowHud(); hudT = 0.2; }
 }
 makeStock(); for (let i = 0; i < 3; i++) addPerson(); applyRobot(); log('Add items, then Start. Spawn a car and have the client confirm.');
 requestAnimationFrame(loop);

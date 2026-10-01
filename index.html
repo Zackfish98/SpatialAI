@@ -22,6 +22,8 @@
   #state { font-weight: 600; margin-bottom: 4px; }
   #log { margin-top: 6px; font-size: 12px; max-height: 120px; overflow: hidden; }
   #log div { padding: 1px 0; } #log .err { color: #b00; }
+  #flow { margin-bottom: 6px; font-size: 12px; } .step { color: #889; padding: 1px 0; } .step.done { color: #2e8b3d; } .step.cur { color: #fff; background: #f96302; border-radius: 4px; padding: 1px 5px; font-weight: 600; }
+  #banner { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 8px 14px; font-size: 14px; line-height: 1.5; max-width: 30vw; text-align: center; }
   #rules { position: fixed; right: 10px; bottom: 10px; width: 320px; padding: 10px 12px; font-size: 12px; }
   #rules ol { margin: 4px 0 0; padding-left: 18px; }
 </style>
@@ -29,15 +31,17 @@
 <body>
 <canvas id="view"></canvas>
 <div id="toolbar" class="box"></div>
-<div id="panel" class="box"><h3>Home Depot Robot</h3><div id="state"></div><div id="info"></div><div id="log"></div></div>
+<div id="panel" class="box"><h3>Home Depot Robot</h3><div id="flow"></div><div id="state"></div><div id="info"></div><div id="log"></div></div>
 <div id="rules" class="box"><b>Rules</b><ol>
   <li>Robot picks ordered items (max 3), then goes to the loading-zone waiting area.</li>
   <li>It avoids shelves, walls and cars, and re-plans around people. A person ahead within 2.6 m makes it slow down (amber flashing light); within 1 m it stops (red flashing light + “PLEASE MOVE”). If no clear path exists it creeps through any gap, or waits until people move.</li>
+  <li>The app registers the client's plate + car type and closes the loading zone to everyone but the client while a car is present; shoppers are kept out or asked to leave.</li>
   <li>It waits until the client's car is parked at the assigned spot <i>and</i> the client confirms their location.</li>
   <li>The app-listed car type is only a guess; the type confirmed on site decides how to load.</li>
   <li>Loading type sets approach gap, lift height and max cargo length (Pickup 3.0 m, SUV 2.5 m, Sedan trunk 1.3 m).</li>
   <li>If cargo won't fit the confirmed vehicle, the robot stops and requests staff assist.</li>
 </ol></div>
+<div id="banner" class="box"></div>
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
